@@ -1,0 +1,16 @@
+{
+  "name": "com.mwessam.asyncrpcfishnet",
+  "version": "1.0.0",
+  "displayName": "Async RPC Fishnet Extensions",
+  "description": "Adds support for async server rpcs.",
+  "unity": "2021.3",
+  "dependencies": {
+    "com.cysharp.unitask": "git+https://github.com/Cysharp/UniTask.git?path=src/UniTask/Assets/Plugins/UniTask",
+    "com.firstgeargames.fishnet": "git+https://github.com/FirstGearGames/FishNet.git?path=Assets/FishNet",
+    "com.nuget.mono-cecil": "1.11.4"
+  },
+  "author": {
+    "name": "Wessam",
+    "email": "mwessam839@gmail.com"
+  }
+}

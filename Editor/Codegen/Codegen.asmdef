@@ -1,0 +1,20 @@
+{
+    "name": "Unity.AsyncRPCFishnet.Codegen",
+    "rootNamespace": "",
+    "references": [
+        "GUID:bebf21f06fe49b541afd9b2400ca9773",
+        "GUID:6996141426f663f4bbdd6a0f4961e123",
+        "GUID:7c88a4a7926ee5145ad2dfa06f454c67"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
