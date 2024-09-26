@@ -116,6 +116,9 @@ namespace CodeGenerating
                     x.CustomAttributes.Any(a => a.AttributeType.FullName == typeof(AsyncRpcAttribute).FullName));
                 foreach (var method in asyncRpcMethods)
                 {
+                    // Store them in a static queue which shouldnt reset on each assembly (Only when the entire thing recompiles which is ideal for us)
+                    // This way we can inject the required method from other assemblies once we find them as that is the only way I could workaround not having direct type references
+                    // In the same assembly.
                     _asyncRpcMethodsQueue.AddRpcToHookQueue((x,y) => InjectOnLogicCompleteMethod(session, method, typeDef,x,y));
                 }
             }
@@ -159,28 +162,56 @@ namespace CodeGenerating
             string regexPattern = $@"^{logicMethodPrefix}{methodName}.*$";
 
             // Use Regex to find the matching method
-            var logicMethod = typeDef.Methods
-                .FirstOrDefault(x => Regex.IsMatch(x.Name, regexPattern));
-            if (logicMethod == null)
+            var logicMethods = typeDef.Methods
+                .Where(x => Regex.IsMatch(x.Name, regexPattern) || x.Name == methodName).ToList();
+            if (!logicMethods.Any())
             {
-                logicMethod = typeDef.Methods
-                    .FirstOrDefault(x => x.Name == methodName);
-                if (logicMethod is null)
+                return;
+            }
+            MethodDefinition logicMethod = null;
+            foreach (var logicMd in logicMethods)
+            {
+                logicMethod = logicMd;
+                if (Regex.IsMatch(logicMd.Name, regexPattern))
                 {
-                    return;
+                    break;
                 }
             }
-            ILProcessor processor = logicMethod.Body.GetILProcessor();
+            ILProcessor processor = logicMethod!.Body.GetILProcessor();
             MethodReference rpcStartMethodReference = method.Module.ImportReference(rpcStartedMethod);
             MethodReference rpcFinishMethodReference = method.Module.ImportReference(rpcFinishMethod);
-            processor.Body.Instructions.Insert(0, processor.Create(OpCodes.Call, rpcStartMethodReference));
-            if (processor.Body.Instructions[^1].OpCode == OpCodes.Ret)
+            // Get method parameters (NetworkConnection and int)
+            var networkConnectionParam = method.Parameters.FirstOrDefault(p => p.ParameterType.FullName == typeof(NetworkConnection).FullName);
+            var intParam = method.Parameters.FirstOrDefault(p => p.ParameterType.FullName == "System.Int32");
+            if (networkConnectionParam is null || intParam is null)
             {
-                processor.Body.Instructions.RemoveAt(processor.Body.Instructions.Count - 1);
-                processor.Emit(OpCodes.Call, rpcFinishMethodReference);
-                processor.Emit(OpCodes.Ret);
+                throw new($"The AsyncRPC {method.Name} in Type {typeDef.Name} does not have the expected signature." +
+                          $"\n Please make sure your AsyncRPC has the following signature: void AsyncRpc(int callerId, NetworkConnection connection = null)");
             }
+            
+            // Load parameters (ldarg) and call rpcStartMethod
+            // Assuming networkConnectionParam is first (ldarg_1) and intParam is second (ldarg_2)
+            processor.Body.Instructions.Insert(0, processor.Create(OpCodes.Ldarg, 1));                // Load int param
+            processor.Body.Instructions.Insert(1, processor.Create(OpCodes.Ldarg, 2));  // Load NetworkConnection param
+            processor.Body.Instructions.Insert(2, processor.Create(OpCodes.Call, rpcStartMethodReference));         // Call rpcStartedMethod
 
+            // Find Ret instruction and replace it with rpcFinishMethod and Ret
+            var retInstruction = processor.Body.Instructions.LastOrDefault(i => i.OpCode == OpCodes.Ret);
+            if (retInstruction != null)
+            {
+                // Insert logic before Ret
+                processor.InsertBefore(retInstruction, processor.Create(OpCodes.Ldarg, 1));                // Load int param
+                processor.InsertBefore(retInstruction, processor.Create(OpCodes.Ldarg, 2));  // Load NetworkConnection param
+                processor.InsertBefore(retInstruction, processor.Create(OpCodes.Call, rpcFinishMethodReference));       // Call rpcFinishMethod
+            }
+            else
+            {
+                // In case there isn't an explicit Ret, add it manually
+                processor.Emit(OpCodes.Ldarg, 1);                // Load int param
+                processor.Emit(OpCodes.Ldarg, 2);  // Load NetworkConnection param
+                processor.Emit(OpCodes.Call, rpcFinishMethodReference);       // Call rpcFinishMethod
+                processor.Emit(OpCodes.Ret);                                  // Return
+            }
             // throw new(string.Join("\n", processor.Body.Instructions.Select(x => x.ToString())));
         }
 

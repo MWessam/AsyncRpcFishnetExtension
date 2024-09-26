@@ -34,12 +34,11 @@ public class AsyncRPCCallManager : NetworkBehaviour
     public override void OnStartServer()
     {
         base.OnStartServer();
-        OnServerAsyncRpcComplete += EndServerRPC;
     }
 
     public override void OnStopServer()
     {
-        OnServerAsyncRpcComplete -= EndServerRPC;
+        base.OnStopServer();
     }
 
     public async UniTask AsyncRPCCall()
@@ -77,15 +76,20 @@ public class AsyncRPCCallManager : NetworkBehaviour
         }
     }
 
-    public static void StartServerRPC()
+    public static void StartServerRPC(int callerId, NetworkConnection networkConnection)
     {
-        Debug.Log("Started Cmd On Server!");
+        Debug.Log($"Started Cmd {callerId} On Server!");
     }
 
-    public static void EndServerRPC()
+    public static void EndServerRPC(int callerId, NetworkConnection networkConnection)
     {
-        Debug.Log("Ending Cmd.");
-        Instance.SendRPCResponse(Instance._callingConnection, Instance._lastCallId);
+        Debug.Log($"Ending Cmd {callerId}.");
+        Instance.InitiateCallbackRequest(callerId, networkConnection);
+    }
+    [Server]
+    private void InitiateCallbackRequest(int callerId, NetworkConnection networkConnection)
+    {
+        SendRPCResponse(networkConnection, callerId);
     }
 }
 public delegate void RPCAction(int requestId, NetworkConnection connection = null);
