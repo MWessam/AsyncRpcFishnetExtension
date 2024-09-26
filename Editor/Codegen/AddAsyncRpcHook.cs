@@ -63,24 +63,20 @@ namespace CodeGenerating
             CodegenSession session = new CodegenSession();
             if (!session.Initialize(assemblyDef.MainModule))
                 return null;
+            // If this is fishnet assembly, ignore as it won't have user defined network behaviours.
             bool fnAssembly = IsFishNetAssembly(compiledAssembly);
             if (fnAssembly) return null;
             
+            // From fishnet source, but I believe this was to filter out duplicates? Not sure.
             AssemblyNameReference anr = session.Module.AssemblyReferences.FirstOrDefault<AssemblyNameReference>(x => x.FullName == session.Module.Assembly.FullName);
             if (anr != null)
                 session.Module.AssemblyReferences.Remove(anr);
-            if (assemblyDef.Name.Name.Contains("AsyncRpc"))
-            {
-                var asyncRpcManagerTypeDefinition =
-                    session.Module.Types.FirstOrDefault(x => nameof(AsyncRPCCallManager) == x.Name);
-                var onStartMethod = asyncRpcManagerTypeDefinition.GetMethod(nameof(AsyncRPCCallManager.StartServerRPC));
-                var onEndMethod = asyncRpcManagerTypeDefinition.GetMethod(nameof(AsyncRPCCallManager.EndServerRPC));
-                _asyncRpcMethodsQueue.BeginHooking(onStartMethod, onEndMethod);
-                return null;
-            }
+            
+            if (CheckIfAsyncRPCAssembly(assemblyDef, session)) return null;
+            
             bool modified = false;
-
             modified |= ProcessNetworkBehaviours(session);
+            
             MemoryStream pe = new MemoryStream();
             MemoryStream pdb = new MemoryStream();
             WriterParameters writerParameters = new WriterParameters
@@ -92,7 +88,36 @@ namespace CodeGenerating
             assemblyDef.Write(pe, writerParameters);
             return new ILPostProcessResult(new InMemoryAssembly(pe.ToArray(), pdb.ToArray()), session.Diagnostics);
         }
+        
+        /// <summary>
+        /// Since it's near impossible to get assembly definitions whenever needed,
+        /// I am storing every hook subscription into a queue. <see cref="AddAsyncRpcMethodsQueue"/>
+        /// Once I find the assembly of async rpc, ill inject the hooks into every queued up call.
+        /// And if any other assembly is found after that, it will automatically inject the hooks.
+        /// </summary>
+        /// <param name="assemblyDef">Current assembly</param>
+        /// <param name="session"></param>
+        /// <returns></returns>
+        private bool CheckIfAsyncRPCAssembly(AssemblyDefinition assemblyDef, CodegenSession session)
+        {
+            if (assemblyDef.Name.Name.Contains("AsyncRpc"))
+            {
+                var asyncRpcManagerTypeDefinition =
+                    session.Module.Types.FirstOrDefault(x => nameof(AsyncRPCCallManager) == x.Name);
+                var onStartMethod = asyncRpcManagerTypeDefinition.GetMethod(nameof(AsyncRPCCallManager.StartServerRPC));
+                var onEndMethod = asyncRpcManagerTypeDefinition.GetMethod(nameof(AsyncRPCCallManager.EndServerRPC));
+                _asyncRpcMethodsQueue.BeginHooking(onStartMethod, onEndMethod);
+                return true;
+            }
 
+            return false;
+        }
+
+        /// <summary>
+        /// Processes all derived types of network behaviours defined by the user and adds hooks to all <see cref="AsyncRpcAttribute"/> methods.
+        /// </summary>
+        /// <param name="session"></param>
+        /// <returns></returns>
         private bool ProcessNetworkBehaviours(CodegenSession session)
         {
             //Get all network behaviours to process.
@@ -104,6 +129,7 @@ namespace CodeGenerating
              * Since processing iterates upward from each child there is no reason
              * to include any inherited NBs. */
             RemoveInheritedTypeDefinitions(networkBehaviourTypeDefs);
+            
             foreach (var typeDef in networkBehaviourTypeDefs)
             {
                 var methods = typeDef.Methods;
@@ -148,15 +174,28 @@ namespace CodeGenerating
             }
 
         }
-
+        /// <summary>
+        /// Will inject on start and on end hooks into our <see cref="AsyncRpcAttribute"/> rpcs.
+        /// </summary>
+        /// <param name="session"></param>
+        /// <param name="method"></param>
+        /// <param name="typeDef"></param>
+        /// <param name="rpcStartedMethod"></param>
+        /// <param name="rpcFinishMethod"></param>
+        /// <exception cref="Exception"></exception>
         private void InjectOnLogicCompleteMethod(CodegenSession session, MethodDefinition method, TypeDefinition typeDef, MethodDefinition rpcStartedMethod, MethodDefinition rpcFinishMethod)
         {
+            // Fishnet relies on generated methods. Any method that has any sort of RPC attribute, will be split
+            // into multiple versions.
+            // RpcWriter, RpcLogic, RpcReader.
+            // RpcLogic is the main method itself.
+            // And its always named RpcLogic___{method_name}
             string logicMethodPrefix = "RpcLogic___";
             string methodName = method.Name; // The name of the original method
             // Create a regex pattern to match methods like RpcLogic___methodname followed by anything
             string regexPattern = $@"^{logicMethodPrefix}{methodName}.*$";
 
-            // Use Regex to find the matching method
+            // Find logic methods that either start with rpclogic prefix or have the same name as the method we are trying to get.
             var logicMethods = typeDef.Methods
                 .Where(x => Regex.IsMatch(x.Name, regexPattern) || x.Name == methodName).ToList();
             if (!logicMethods.Any())
@@ -164,15 +203,24 @@ namespace CodeGenerating
                 return;
             }
             MethodDefinition logicMethod = null;
+            // Since the order of source generating is indeterminate and can not be specified,
+            // we will either use RpcLogic___ prefixed methods if found (Which indicates fishnet source gen ran first)
+            // or use the main method itself (Which indicates that we ran before fishnet source gen)
+            
             foreach (var logicMd in logicMethods)
             {
+                // Assign the currently found method to be the logic method.
                 logicMethod = logicMd;
+                
+                // If we find RpcLogic___ prefix method, we will break out of the loop and use that to add our hooks.
                 if (Regex.IsMatch(logicMd.Name, regexPattern))
                 {
                     break;
                 }
             }
+            
             ILProcessor processor = logicMethod!.Body.GetILProcessor();
+
             MethodReference rpcStartMethodReference = method.Module.ImportReference(rpcStartedMethod);
             MethodReference rpcFinishMethodReference = method.Module.ImportReference(rpcFinishMethod);
             // Get method parameters (NetworkConnection and int)
@@ -207,7 +255,6 @@ namespace CodeGenerating
                 processor.Emit(OpCodes.Call, rpcFinishMethodReference);       // Call rpcFinishMethod
                 processor.Emit(OpCodes.Ret);                                  // Return
             }
-            // throw new(string.Join("\n", processor.Body.Instructions.Select(x => x.ToString())));
         }
 
 

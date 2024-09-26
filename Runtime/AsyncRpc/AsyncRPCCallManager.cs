@@ -1,27 +1,39 @@
 using System;
 using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Reflection;
-using System.Threading.Tasks;
 using Cysharp.Threading.Tasks;
 using FishNet.Connection;
 using FishNet.Object;
-using UnityEngine;
-
+/// <summary>
+/// Used to signal that this rpc will be used for async purposes.
+/// Automatically adds OnStartLogic and OnEndLogic hooks to notify the client.
+/// </summary>
 public class AsyncRpcAttribute : Attribute
 {
     
 }
+/// <summary>
+/// Singleton manager that handles async rpc calls.
+/// Using <see cref="ExecuteRPC"/>, you will be able to await for any server rpc to complete its execution
+/// as long as it follows <see cref="AsyncRPCAction"/> signature.
+/// </summary>
 public class AsyncRPCCallManager : NetworkBehaviour
 {
+    /// <summary>
+    /// Has to be a singleton as you can't run an RPC on non network behaviour classes.
+    /// </summary>
     public static AsyncRPCCallManager Instance { get; private set; }
+    
+    /// <summary>
+    /// Concurrent Dictionary just in case of race conditions (Which is unlikely but better safe than sorry.)
+    /// </summary>
     private ConcurrentDictionary<int, RPCCall> _rpcCalls = new();
-    private int _lastCallId = 0;
-    // private static Queue<int>
-    private NetworkConnection _callingConnection;
-
+    
+    // Used to assign unique Ids
+    private static int _lastCallId;
+    
+    /// <summary>
+    /// Initialize the singleton.
+    /// </summary>
     private void Awake()
     {
         if (Instance)
@@ -31,43 +43,27 @@ public class AsyncRPCCallManager : NetworkBehaviour
         }
         Instance = this;
     }
-
-    public override void OnStartServer()
-    {
-        base.OnStartServer();
-    }
-
-    public override void OnStopServer()
-    {
-        base.OnStopServer();
-    }
-
-    public async UniTask AsyncRPCCall()
-    {
-        Debug.Log("Invoking Cmd");
-        await ExecuteRPC(CmdTest);
-        Debug.Log("Invoked!");
-    }
-    [AsyncRpc]
-    [ServerRpc(RequireOwnership = false)]
-    public void CmdTest(int callId, NetworkConnection networkConnection = null)
-    {
-        Debug.Log("Done something on server.");
-        _callingConnection = networkConnection;
-    }
-    public async UniTask ExecuteRPC(RPCAction rpcAction)
+    /// <summary>
+    /// Assigns a unique client side id and invokes your async rpc.
+    /// Once invoked, the server will then renotify the client using that id once it completes its execution.
+    /// </summary>
+    /// <param name="asyncRPCAction"></param>
+    public async UniTask ExecuteRPC(AsyncRPCAction asyncRPCAction)
     {
         int callId = ++_lastCallId;
-        var rpcCall = new RPCCall(rpcAction);
+        var rpcCall = new RPCCall(asyncRPCAction);
         _rpcCalls.TryAdd(callId, rpcCall);
-        RPC(callId, rpcCall);
+        rpcCall.AsyncRPCAction?.Invoke(callId);
+        
+        // Request.Task is waiting for the client to be notified by the server.
         await rpcCall.Request.Task;
-        Debug.Log("Finished executing.");
     }
-    private void RPC(int callId, RPCCall rpcCall)
-    {
-        rpcCall.RPCAction?.Invoke(callId);
-    }
+    
+    /// <summary>
+    /// Notifies client that the RPC has been handled and that it can proceed.
+    /// </summary>
+    /// <param name="client"></param>
+    /// <param name="callId"></param>
     [TargetRpc]
     public void SendRPCResponse(NetworkConnection client, int callId)
     {
@@ -76,33 +72,42 @@ public class AsyncRPCCallManager : NetworkBehaviour
             call.Request.TrySetResult(true);
         }
     }
-
+    /// <summary>
+    /// Called at the start of the AsyncRPC execution.
+    /// </summary>
+    /// <param name="callerId"></param>
+    /// <param name="networkConnection"></param>
+    /// <returns></returns>
     public static void StartServerRPC(int callerId, NetworkConnection networkConnection)
     {
-        Debug.Log($"Started Cmd {callerId} On Server!");
     }
-
+    /// <summary>
+    /// Called at the end of the AsyncRPC execution.
+    /// </summary>
+    /// <param name="callerId"></param>
+    /// <param name="networkConnection"></param>
     public static void EndServerRPC(int callerId, NetworkConnection networkConnection)
     {
-        Debug.Log($"Ending Cmd {callerId}.");
-        Instance.InitiateCallbackRequest(callerId, networkConnection);
-    }
-    [Server]
-    private void InitiateCallbackRequest(int callerId, NetworkConnection networkConnection)
-    {
-        SendRPCResponse(networkConnection, callerId);
+        Instance.SendRPCResponse(networkConnection, callerId);
     }
 }
-public delegate void RPCAction(int requestId, NetworkConnection connection = null);
+/// <summary>
+/// The only supported AsyncRPC method signature.
+/// </summary>
+public delegate void AsyncRPCAction(int requestId, NetworkConnection connection = null);
 
+/// <summary>
+/// Wraps an AsyncRPC to contain its TaskCompletionSource.
+/// This will be used to notify the client that the Server RPC has been handled.
+/// </summary>
 public class RPCCall
 {
     public UniTaskCompletionSource<object> Request;
-    public RPCAction RPCAction;
+    public AsyncRPCAction AsyncRPCAction;
 
-    public RPCCall(RPCAction rpcAction)
+    public RPCCall(AsyncRPCAction asyncRPCAction)
     {
-        RPCAction = rpcAction;
+        AsyncRPCAction = asyncRPCAction;
         Request = new UniTaskCompletionSource<object>();
     }
 }
