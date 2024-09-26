@@ -20,3 +20,7 @@ await AsyncRPCCallManager.Instance.ExecuteRPC(AsyncRPC);
 You must have an item with the component AsyncRPCCallManager for it to work.
 
 
+# Dependencies
+[Fishnet](https://github.com/FirstGearGames/FishNet)
+[Unitask](https://github.com/Cysharp/UniTask)
+Mono.Cecil from Unity's Registry.
