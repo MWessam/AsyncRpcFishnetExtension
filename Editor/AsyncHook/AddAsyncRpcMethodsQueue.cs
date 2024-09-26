@@ -1,7 +1,7 @@
 #if UNITY_EDITOR
 using System;
 using System.Collections.Generic;
-using Mono.Cecil;
+using MonoFN.Cecil;
 
 public class AddAsyncRpcMethodsQueue
 {

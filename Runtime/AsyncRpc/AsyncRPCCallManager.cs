@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -16,7 +17,7 @@ public class AsyncRpcAttribute : Attribute
 public class AsyncRPCCallManager : NetworkBehaviour
 {
     public static AsyncRPCCallManager Instance { get; private set; }
-    private Dictionary<int, RPCCall> _rpcCalls = new();
+    private ConcurrentDictionary<int, RPCCall> _rpcCalls = new();
     private int _lastCallId = 0;
     // private static Queue<int>
     private NetworkConnection _callingConnection;
@@ -58,7 +59,7 @@ public class AsyncRPCCallManager : NetworkBehaviour
     {
         int callId = ++_lastCallId;
         var rpcCall = new RPCCall(rpcAction);
-        _rpcCalls.Add(callId, rpcCall);
+        _rpcCalls.TryAdd(callId, rpcCall);
         RPC(callId, rpcCall);
         await rpcCall.Request.Task;
         Debug.Log("Finished executing.");
@@ -70,7 +71,7 @@ public class AsyncRPCCallManager : NetworkBehaviour
     [TargetRpc]
     public void SendRPCResponse(NetworkConnection client, int callId)
     {
-        if (_rpcCalls.Remove(callId, out var call))
+        if (_rpcCalls.TryRemove(callId, out var call))
         {
             call.Request.TrySetResult(true);
         }

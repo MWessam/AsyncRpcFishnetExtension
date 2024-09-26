@@ -1,3 +1,16 @@
 {
-	"name": "AsyncHook"
+    "name": "AsyncHook",
+    "rootNamespace": "",
+    "references": [
+        "GUID:23311a592bb0c5640b641143d87bf5b7"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
 }

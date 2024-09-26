@@ -1,6 +1,6 @@
 using System.IO;
-using Mono.Cecil;
-using Mono.Cecil.Cil;
+using MonoFN.Cecil;
+using MonoFN.Cecil.Cil;
 using Unity.CompilationPipeline.Common.ILPostProcessing;
 
 namespace CodeGenerating

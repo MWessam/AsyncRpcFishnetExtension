@@ -1,5 +1,5 @@
 using System.Collections.Generic;
-using Mono.Cecil;
+using MonoFN.Cecil;
 using Unity.CompilationPipeline.Common.Diagnostics;
 
 namespace CodeGenerating
